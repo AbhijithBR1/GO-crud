@@ -7,9 +7,17 @@ import (
 
 	"bookmanagement/internal/handlers"
 	"bookmanagement/internal/middleware"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load .env into the environment, like require('dotenv').config() in Node.
+	// In production you set real env vars instead, so a missing file is fine.
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, relying on system environment variables")
+	}
+
 	mux := http.NewServeMux()
 
 	// === Public Routes ===

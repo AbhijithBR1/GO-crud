@@ -1,0 +1,15 @@
+# Environment variables — never commit secrets
+.env
+.env.local
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/bin/
+
+# Test binary and coverage output
+*.test
+*.out
