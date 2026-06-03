@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 
+	"bookmanagement/internal/database"
 	"bookmanagement/internal/handlers"
 	"bookmanagement/internal/middleware"
 
@@ -16,6 +18,18 @@ func main() {
 	// In production you set real env vars instead, so a missing file is fine.
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, relying on system environment variables")
+	}
+
+	// Open the shared connection pool and verify the DB is reachable.
+	if err := database.Connect(); err != nil {
+		log.Fatal("database connection failed: ", err)
+	}
+	defer database.Close()
+	fmt.Println("Connected to Postgres!")
+
+	// Create tables (if missing) and seed starter data.
+	if err := database.InitSchema(context.Background()); err != nil {
+		log.Fatal("schema init failed: ", err)
 	}
 
 	mux := http.NewServeMux()

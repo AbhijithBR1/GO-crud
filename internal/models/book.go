@@ -1,8 +1,12 @@
 package models
 
 import (
+	"context"
 	"errors"
-	"sync"
+
+	"bookmanagement/internal/database"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Book represents our data structure.
@@ -14,83 +18,89 @@ type Book struct {
 	Author string `json:"author"`
 }
 
-// In-memory data store.
-// A mutex (sync.Mutex) is used to prevent issues when multiple requests
-// try to read/write the 'books' array at the same time.
-var (
-	books = []Book{
-		{ID: 1, Title: "The Go Programming Language", Author: "Alan A. A. Donovan"},
-		{ID: 2, Title: "JavaScript: The Good Parts", Author: "Douglas Crockford"},
-	}
-	nextID = 3
-	mu     sync.Mutex
-)
-
 // ErrBookNotFound is a custom error, similar to throwing a new Error() in JS.
 var ErrBookNotFound = errors.New("book not found")
 
-// GetAllBooks returns a copy of our books slice.
-func GetAllBooks() []Book {
-	mu.Lock()
-	defer mu.Unlock() // 'defer' ensures this runs right before the function returns
-	return books
-}
+// GetAllBooks returns every book, ordered by id.
+func GetAllBooks(ctx context.Context) ([]Book, error) {
+	rows, err := database.Pool.Query(ctx, "SELECT id, title, author FROM books ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close() // always close rows to release the connection back to the pool
 
-// GetBookByID searches for a book.
-func GetBookByID(id int) (Book, error) {
-	mu.Lock()
-	defer mu.Unlock()
-	
-	for _, b := range books {
-		if b.ID == id {
-			return b, nil
+	books := []Book{}
+	for rows.Next() {
+		var b Book
+		// Scan copies the columns of the current row into our struct fields,
+		// in the same order they appear in the SELECT.
+		if err := rows.Scan(&b.ID, &b.Title, &b.Author); err != nil {
+			return nil, err
 		}
+		books = append(books, b)
 	}
-	return Book{}, ErrBookNotFound
+	return books, rows.Err()
 }
 
-// CreateBook adds a new book to our slice.
-func CreateBook(title, author string) Book {
-	mu.Lock()
-	defer mu.Unlock()
-	
-	book := Book{
-		ID:     nextID,
-		Title:  title,
-		Author: author,
+// GetBookByID searches for a single book.
+func GetBookByID(ctx context.Context, id int) (Book, error) {
+	var b Book
+	// $1 is a placeholder — pgx sends the value separately, which prevents SQL injection.
+	err := database.Pool.
+		QueryRow(ctx, "SELECT id, title, author FROM books WHERE id = $1", id).
+		Scan(&b.ID, &b.Title, &b.Author)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Book{}, ErrBookNotFound
 	}
-	nextID++
-	books = append(books, book) // append is like Array.push() in JS
-	return book
+	if err != nil {
+		return Book{}, err
+	}
+	return b, nil
 }
 
-// UpdateBook finds and modifies a book.
-func UpdateBook(id int, title, author string) (Book, error) {
-	mu.Lock()
-	defer mu.Unlock()
-	
-	for i, b := range books {
-		if b.ID == id {
-			books[i].Title = title
-			books[i].Author = author
-			return books[i], nil
-		}
+// CreateBook inserts a new book and returns it with its DB-generated id.
+func CreateBook(ctx context.Context, title, author string) (Book, error) {
+	var b Book
+	// RETURNING gives us back the inserted row (including the SERIAL id) in one round trip.
+	err := database.Pool.
+		QueryRow(ctx,
+			"INSERT INTO books (title, author) VALUES ($1, $2) RETURNING id, title, author",
+			title, author,
+		).
+		Scan(&b.ID, &b.Title, &b.Author)
+	if err != nil {
+		return Book{}, err
 	}
-	return Book{}, ErrBookNotFound
+	return b, nil
 }
 
-// DeleteBook removes a book from the slice.
-func DeleteBook(id int) error {
-	mu.Lock()
-	defer mu.Unlock()
-	
-	for i, b := range books {
-		if b.ID == id {
-			// This is Go's way to 'splice' an array
-			// We take everything before the item, and append everything after it
-			books = append(books[:i], books[i+1:]...)
-			return nil
-		}
+// UpdateBook modifies an existing book and returns the updated row.
+func UpdateBook(ctx context.Context, id int, title, author string) (Book, error) {
+	var b Book
+	err := database.Pool.
+		QueryRow(ctx,
+			"UPDATE books SET title = $1, author = $2 WHERE id = $3 RETURNING id, title, author",
+			title, author, id,
+		).
+		Scan(&b.ID, &b.Title, &b.Author)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Book{}, ErrBookNotFound
 	}
-	return ErrBookNotFound
+	if err != nil {
+		return Book{}, err
+	}
+	return b, nil
+}
+
+// DeleteBook removes a book by id.
+func DeleteBook(ctx context.Context, id int) error {
+	// Exec is used for statements that don't return rows.
+	tag, err := database.Pool.Exec(ctx, "DELETE FROM books WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrBookNotFound
+	}
+	return nil
 }
