@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // User represents our user data structure.
@@ -27,18 +28,27 @@ var (
 	ErrInvalidToken = errors.New("invalid or expired token")
 )
 
-// RegisterUser creates a new user.
+// tokenTTL is how long a session token stays valid after issue.
+const tokenTTL = "7 days"
+
+// RegisterUser creates a new user with a bcrypt-hashed password.
 func RegisterUser(ctx context.Context, username, password string) (User, error) {
+	// bcrypt salts and hashes the password. The result is a single string
+	// like "$2a$10$..." that already contains the salt — store it as-is.
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return User{}, err
+	}
+
 	var u User
-	// Note: In a real app, you MUST hash this password using bcrypt before storing it!
-	err := database.Pool.
+	err = database.Pool.
 		QueryRow(ctx,
 			"INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id, username",
-			username, password,
+			username, string(hash),
 		).
 		Scan(&u.ID, &u.Username)
 	if err != nil {
-		// Postgres error 23505 is a unique-constraint violation — the username is taken.
+		// Postgres error 23505 is a unique-constraint violation — username taken.
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return User{}, ErrUserExists
@@ -48,19 +58,21 @@ func RegisterUser(ctx context.Context, username, password string) (User, error) 
 	return u, nil
 }
 
-// LoginUser verifies credentials and returns a token string.
+// LoginUser verifies the bcrypt hash and returns a fresh token valid for tokenTTL.
 func LoginUser(ctx context.Context, username, password string) (string, error) {
-	var storedPassword string
+	var storedHash string
 	err := database.Pool.
 		QueryRow(ctx, "SELECT password FROM users WHERE username = $1", username).
-		Scan(&storedPassword)
+		Scan(&storedHash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrInvalidLogin
 	}
 	if err != nil {
 		return "", err
 	}
-	if storedPassword != password {
+
+	// bcrypt does the comparison in constant time and handles the embedded salt.
+	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(password)); err != nil {
 		return "", ErrInvalidLogin
 	}
 
@@ -69,21 +81,26 @@ func LoginUser(ctx context.Context, username, password string) (string, error) {
 	rand.Read(bytes)
 	token := hex.EncodeToString(bytes)
 
-	// Persist the session token so it survives restarts.
+	// Persist the session token with an expiry timestamp.
 	if _, err := database.Pool.Exec(ctx,
-		"INSERT INTO tokens (token, username) VALUES ($1, $2)", token, username,
+		"INSERT INTO tokens (token, username, expires_at) VALUES ($1, $2, NOW() + INTERVAL '"+tokenTTL+"')",
+		token, username,
 	); err != nil {
 		return "", err
 	}
 	return token, nil
 }
 
-// ValidateToken checks that a token exists and returns the owning username.
+// ValidateToken checks that a token exists AND hasn't expired, returning the owning username.
 func ValidateToken(ctx context.Context, token string) (string, error) {
 	var username string
 	err := database.Pool.
-		QueryRow(ctx, "SELECT username FROM tokens WHERE token = $1", token).
+		QueryRow(ctx,
+			"SELECT username FROM tokens WHERE token = $1 AND expires_at > NOW()",
+			token,
+		).
 		Scan(&username)
+	// pgx.ErrNoRows covers both "no such token" and "token expired" — both look the same to the caller.
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrInvalidToken
 	}
