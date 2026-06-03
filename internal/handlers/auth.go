@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"bookmanagement/internal/models"
@@ -19,9 +20,13 @@ func HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := models.RegisterUser(reqBody.Username, reqBody.Password)
-	if err != nil {
+	user, err := models.RegisterUser(r.Context(), reqBody.Username, reqBody.Password)
+	if errors.Is(err, models.ErrUserExists) {
 		http.Error(w, err.Error(), http.StatusConflict) // 409 Conflict
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to register user", http.StatusInternalServerError)
 		return
 	}
 
@@ -42,9 +47,13 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := models.LoginUser(reqBody.Username, reqBody.Password)
-	if err != nil {
+	token, err := models.LoginUser(r.Context(), reqBody.Username, reqBody.Password)
+	if errors.Is(err, models.ErrInvalidLogin) {
 		http.Error(w, err.Error(), http.StatusUnauthorized) // 401 Unauthorized
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to log in", http.StatusInternalServerError)
 		return
 	}
 

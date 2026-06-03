@@ -27,9 +27,9 @@ func RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// 3. Validate the token against our map in models
+		// 3. Validate the token against the database
 		token := parts[1]
-		_, err := models.ValidateToken(token)
+		_, err := models.ValidateToken(r.Context(), token)
 		if err != nil {
 			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
 			return // Return early to stop execution (like NOT calling next() in Express)

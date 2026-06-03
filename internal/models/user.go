@@ -1,10 +1,15 @@
 package models
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"sync"
+
+	"bookmanagement/internal/database"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // User represents our user data structure.
@@ -13,16 +18,8 @@ type User struct {
 	Username string `json:"username"`
 	// `json:"-"` tells the JSON encoder to never include this field in responses.
 	// We don't want to accidentally leak passwords!
-	Password string `json:"-"` 
+	Password string `json:"-"`
 }
-
-var (
-	// Maps are Go's built-in key-value stores (like new Map() or {} in JS)
-	users   = make(map[string]User) // Keyed by username
-	nextUID = 1
-	tokens  = make(map[string]string) // Key: token string, Value: username
-	userMu  sync.Mutex
-)
 
 var (
 	ErrUserExists   = errors.New("username already exists")
@@ -31,54 +28,67 @@ var (
 )
 
 // RegisterUser creates a new user.
-func RegisterUser(username, password string) (User, error) {
-	userMu.Lock()
-	defer userMu.Unlock()
-
-	// Check if the key already exists in the map
-	if _, exists := users[username]; exists {
-		return User{}, ErrUserExists
+func RegisterUser(ctx context.Context, username, password string) (User, error) {
+	var u User
+	// Note: In a real app, you MUST hash this password using bcrypt before storing it!
+	err := database.Pool.
+		QueryRow(ctx,
+			"INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id, username",
+			username, password,
+		).
+		Scan(&u.ID, &u.Username)
+	if err != nil {
+		// Postgres error 23505 is a unique-constraint violation — the username is taken.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return User{}, ErrUserExists
+		}
+		return User{}, err
 	}
-
-	u := User{
-		ID:       nextUID,
-		Username: username,
-		// Note: In a real app, you MUST hash this password using bcrypt!
-		Password: password, 
-	}
-	nextUID++
-	users[username] = u
 	return u, nil
 }
 
 // LoginUser verifies credentials and returns a token string.
-func LoginUser(username, password string) (string, error) {
-	userMu.Lock()
-	defer userMu.Unlock()
-
-	user, exists := users[username]
-	if !exists || user.Password != password {
+func LoginUser(ctx context.Context, username, password string) (string, error) {
+	var storedPassword string
+	err := database.Pool.
+		QueryRow(ctx, "SELECT password FROM users WHERE username = $1", username).
+		Scan(&storedPassword)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrInvalidLogin
+	}
+	if err != nil {
+		return "", err
+	}
+	if storedPassword != password {
 		return "", ErrInvalidLogin
 	}
 
-	// Generate a simple 16-byte random token
+	// Generate a simple 16-byte random token.
 	bytes := make([]byte, 16)
-	rand.Read(bytes) // Fills the byte array with random data
+	rand.Read(bytes)
 	token := hex.EncodeToString(bytes)
 
-	// Save token session in our map
-	tokens[token] = username
+	// Persist the session token so it survives restarts.
+	if _, err := database.Pool.Exec(ctx,
+		"INSERT INTO tokens (token, username) VALUES ($1, $2)", token, username,
+	); err != nil {
+		return "", err
+	}
 	return token, nil
 }
 
-// ValidateToken checks if a token exists in our map.
-func ValidateToken(token string) (string, error) {
-	userMu.Lock()
-	defer userMu.Unlock()
-
-	username, exists := tokens[token]
-	if !exists {
+// ValidateToken checks that a token exists and returns the owning username.
+func ValidateToken(ctx context.Context, token string) (string, error) {
+	var username string
+	err := database.Pool.
+		QueryRow(ctx, "SELECT username FROM tokens WHERE token = $1", token).
+		Scan(&username)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrInvalidToken
+	}
+	if err != nil {
+		return "", err
 	}
 	return username, nil
 }

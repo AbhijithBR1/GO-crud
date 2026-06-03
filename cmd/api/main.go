@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -25,6 +26,11 @@ func main() {
 	}
 	defer database.Close()
 	fmt.Println("Connected to Postgres!")
+
+	// Create tables (if missing) and seed starter data.
+	if err := database.InitSchema(context.Background()); err != nil {
+		log.Fatal("schema init failed: ", err)
+	}
 
 	mux := http.NewServeMux()
 
