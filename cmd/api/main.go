@@ -56,5 +56,5 @@ func main() {
 	fmt.Println("Try visiting: http://localhost:8080/books")
 	
 	// Start the server
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	log.Fatal(http.ListenAndServe(":8080", middleware.EnableCORS(mux)))
 }
