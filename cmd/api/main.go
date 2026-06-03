@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"bookmanagement/internal/database"
 	"bookmanagement/internal/handlers"
 	"bookmanagement/internal/middleware"
 
@@ -17,6 +18,13 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, relying on system environment variables")
 	}
+
+	// Open the shared connection pool and verify the DB is reachable.
+	if err := database.Connect(); err != nil {
+		log.Fatal("database connection failed: ", err)
+	}
+	defer database.Close()
+	fmt.Println("Connected to Postgres!")
 
 	mux := http.NewServeMux()
 
