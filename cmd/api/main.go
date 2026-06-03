@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"bookmanagement/internal/database"
 	"bookmanagement/internal/handlers"
@@ -35,11 +36,14 @@ func main() {
 	mux := http.NewServeMux()
 
 	// === Public Routes ===
-	
+
+	// Liveness/readiness check used by hosting platforms.
+	mux.HandleFunc("GET /health", handlers.HandleHealth)
+
 	// Authentication
 	mux.HandleFunc("POST /register", handlers.HandleRegister)
 	mux.HandleFunc("POST /login", handlers.HandleLogin)
-	
+
 	// Anyone can see the list of books
 	mux.HandleFunc("GET /books", handlers.HandleGetBooks)
 
@@ -52,9 +56,18 @@ func main() {
 	mux.HandleFunc("PUT /books/{id}", middleware.RequireAuth(handlers.HandleUpdateBook))
 	mux.HandleFunc("DELETE /books/{id}", middleware.RequireAuth(handlers.HandleDeleteBook))
 
-	fmt.Println("Server is running on port 8080...")
-	fmt.Println("Try visiting: http://localhost:8080/books")
-	
+	// Read PORT from the environment — most hosting platforms (Render, Railway,
+	// Fly.io, Cloud Run, etc.) inject this and require the app to bind to it.
+	// Fall back to 8080 for local development.
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	addr := ":" + port
+
+	fmt.Printf("Server is running on port %s...\n", port)
+	fmt.Printf("Try visiting: http://localhost:%s/books\n", port)
+
 	// Start the server
-	log.Fatal(http.ListenAndServe(":8080", middleware.EnableCORS(mux)))
+	log.Fatal(http.ListenAndServe(addr, middleware.EnableCORS(mux)))
 }

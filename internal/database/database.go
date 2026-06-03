@@ -58,9 +58,15 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS tokens (
-	token    TEXT PRIMARY KEY,
-	username TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE
+	token      TEXT PRIMARY KEY,
+	username   TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+	expires_at TIMESTAMPTZ NOT NULL
 );
+
+-- Idempotent migration: add expires_at to a pre-existing tokens table.
+-- The DEFAULT only applies to rows that already exist; new inserts set it explicitly.
+ALTER TABLE tokens
+	ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days');
 
 INSERT INTO books (title, author)
 SELECT seed.title, seed.author
