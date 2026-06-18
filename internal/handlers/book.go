@@ -1,84 +1,81 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
 	"bookmanagement/internal/models"
+
+	"github.com/gin-gonic/gin"
 )
 
 // HandleGetBooks corresponds to GET /books
-func HandleGetBooks(w http.ResponseWriter, r *http.Request) {
-	books, err := models.GetAllBooks(r.Context())
+func HandleGetBooks(c *gin.Context) {
+	books, err := models.GetAllBooks(c.Request.Context())
 	if err != nil {
-		http.Error(w, "Failed to fetch books", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch books"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	// json.NewEncoder(w).Encode(books) is equivalent to writing JSON.stringify(books)
-	json.NewEncoder(w).Encode(books)
+	c.JSON(http.StatusOK, books)
 }
 
-// HandleGetBookByID corresponds to GET /books/{id}
-func HandleGetBookByID(w http.ResponseWriter, r *http.Request) {
-	// r.PathValue gets the {id} from the URL defined in our router
-	idStr := r.PathValue("id")
+// HandleGetBookByID corresponds to GET /books/:id
+func HandleGetBookByID(c *gin.Context) {
+	// c.Param gets the :id from the URL defined in our router
+	idStr := c.Param("id")
 
 	// Convert the string ID to an integer (like parseInt in JS)
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
 		return
 	}
 
-	book, err := models.GetBookByID(r.Context(), id)
+	book, err := models.GetBookByID(c.Request.Context(), id)
 	if errors.Is(err, models.ErrBookNotFound) {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 	if err != nil {
-		http.Error(w, "Failed to fetch book", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch book"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(book)
+	c.JSON(http.StatusOK, book)
 }
 
 // HandleCreateBook corresponds to POST /books
-func HandleCreateBook(w http.ResponseWriter, r *http.Request) {
+func HandleCreateBook(c *gin.Context) {
 	// A temporary struct to hold the incoming JSON (like destructuring a JS object)
 	var reqBody struct {
 		Title  string `json:"title"`
 		Author string `json:"author"`
 	}
 
-	// json.NewDecoder(r.Body).Decode() is equivalent to JSON.parse(request.body)
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+	// c.ShouldBindJSON is equivalent to JSON.parse(request.body)
+	if err := c.ShouldBindJSON(&reqBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
 		return
 	}
 
-	book, err := models.CreateBook(r.Context(), reqBody.Title, reqBody.Author)
+	book, err := models.CreateBook(c.Request.Context(), reqBody.Title, reqBody.Author)
 	if err != nil {
-		http.Error(w, "Failed to create book", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create book"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated) // Return HTTP 201 Created
-	json.NewEncoder(w).Encode(book)
+	c.JSON(http.StatusCreated, book) // Return HTTP 201 Created
 }
 
-// HandleUpdateBook corresponds to PUT /books/{id}
-func HandleUpdateBook(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
+// HandleUpdateBook corresponds to PUT /books/:id
+func HandleUpdateBook(c *gin.Context) {
+	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
 		return
 	}
 
@@ -86,43 +83,42 @@ func HandleUpdateBook(w http.ResponseWriter, r *http.Request) {
 		Title  string `json:"title"`
 		Author string `json:"author"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&reqBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
 		return
 	}
 
-	book, err := models.UpdateBook(r.Context(), id, reqBody.Title, reqBody.Author)
+	book, err := models.UpdateBook(c.Request.Context(), id, reqBody.Title, reqBody.Author)
 	if errors.Is(err, models.ErrBookNotFound) {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 	if err != nil {
-		http.Error(w, "Failed to update book", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update book"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(book)
+	c.JSON(http.StatusOK, book)
 }
 
-// HandleDeleteBook corresponds to DELETE /books/{id}
-func HandleDeleteBook(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
+// HandleDeleteBook corresponds to DELETE /books/:id
+func HandleDeleteBook(c *gin.Context) {
+	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
 		return
 	}
 
-	err = models.DeleteBook(r.Context(), id)
+	err = models.DeleteBook(c.Request.Context(), id)
 	if errors.Is(err, models.ErrBookNotFound) {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 	if err != nil {
-		http.Error(w, "Failed to delete book", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete book"})
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent) // Return HTTP 204 No Content
+	c.Status(http.StatusNoContent) // Return HTTP 204 No Content
 }

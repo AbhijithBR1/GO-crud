@@ -1,65 +1,61 @@
 package handlers
 
 import (
-	"encoding/json"
-	"errors"
+ 	"errors"
 	"net/http"
 
 	"bookmanagement/internal/models"
+
+	"github.com/gin-gonic/gin"
 )
 
 // HandleRegister corresponds to POST /register
-func HandleRegister(w http.ResponseWriter, r *http.Request) {
+func HandleRegister(c *gin.Context) {
 	var reqBody struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&reqBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
 		return
 	}
 
-	user, err := models.RegisterUser(r.Context(), reqBody.Username, reqBody.Password)
+	user, err := models.RegisterUser(c.Request.Context(), reqBody.Username, reqBody.Password)
 	if errors.Is(err, models.ErrUserExists) {
-		http.Error(w, err.Error(), http.StatusConflict) // 409 Conflict
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()}) // 409 Conflict
 		return
 	}
 	if err != nil {
-		http.Error(w, "Failed to register user", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register user"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(user)
+	c.JSON(http.StatusCreated, user)
 }
 
 // HandleLogin corresponds to POST /login
-func HandleLogin(w http.ResponseWriter, r *http.Request) {
+func HandleLogin(c *gin.Context) {
 	var reqBody struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&reqBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
 		return
 	}
 
-	token, err := models.LoginUser(r.Context(), reqBody.Username, reqBody.Password)
+	token, err := models.LoginUser(c.Request.Context(), reqBody.Username, reqBody.Password)
 	if errors.Is(err, models.ErrInvalidLogin) {
-		http.Error(w, err.Error(), http.StatusUnauthorized) // 401 Unauthorized
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()}) // 401 Unauthorized
 		return
 	}
 	if err != nil {
-		http.Error(w, "Failed to log in", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to log in"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	// We return the token as JSON: { "token": "abc123def456" }
-	json.NewEncoder(w).Encode(map[string]string{
-		"token": token,
-	})
+	c.JSON(http.StatusOK, gin.H{"token": token})
 }

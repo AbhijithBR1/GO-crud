@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 
 	"bookmanagement/internal/database"
 	"bookmanagement/internal/handlers"
 	"bookmanagement/internal/middleware"
 
+	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
 
@@ -33,28 +33,33 @@ func main() {
 		log.Fatal("schema init failed: ", err)
 	}
 
-	mux := http.NewServeMux()
+	router := gin.Default()
+
+	// Apply CORS middleware globally.
+	router.Use(middleware.EnableCORS())
 
 	// === Public Routes ===
 
 	// Liveness/readiness check used by hosting platforms.
-	mux.HandleFunc("GET /health", handlers.HandleHealth)
+	router.GET("/health", handlers.HandleHealth)
 
 	// Authentication
-	mux.HandleFunc("POST /register", handlers.HandleRegister)
-	mux.HandleFunc("POST /login", handlers.HandleLogin)
+	router.POST("/register", handlers.HandleRegister)
+	router.POST("/login", handlers.HandleLogin)
 
 	// Anyone can see the list of books
-	mux.HandleFunc("GET /books", handlers.HandleGetBooks)
-
+	router.GET("/books", handlers.HandleGetBooks)
 
 	// === Protected Routes ===
-	// We wrap these handler functions with our RequireAuth middleware.
-	
-	mux.HandleFunc("GET /books/{id}", middleware.RequireAuth(handlers.HandleGetBookByID))
-	mux.HandleFunc("POST /books", middleware.RequireAuth(handlers.HandleCreateBook))
-	mux.HandleFunc("PUT /books/{id}", middleware.RequireAuth(handlers.HandleUpdateBook))
-	mux.HandleFunc("DELETE /books/{id}", middleware.RequireAuth(handlers.HandleDeleteBook))
+	// We use a Gin route group with our RequireAuth middleware.
+	protected := router.Group("/")
+	protected.Use(middleware.RequireAuth())
+	{
+		protected.GET("/books/:id", handlers.HandleGetBookByID)
+		protected.POST("/books", handlers.HandleCreateBook)
+		protected.PUT("/books/:id", handlers.HandleUpdateBook)
+		protected.DELETE("/books/:id", handlers.HandleDeleteBook)
+	}
 
 	// Read PORT from the environment — most hosting platforms (Render, Railway,
 	// Fly.io, Cloud Run, etc.) inject this and require the app to bind to it.
@@ -69,5 +74,5 @@ func main() {
 	fmt.Printf("Try visiting: http://localhost:%s/books\n", port)
 
 	// Start the server
-	log.Fatal(http.ListenAndServe(addr, middleware.EnableCORS(mux)))
+	log.Fatal(router.Run(addr))
 }
